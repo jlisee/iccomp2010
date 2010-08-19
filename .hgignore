@@ -1,0 +1,7 @@
+# use glob syntax.
+syntax: glob
+
+*.pyc
+*~
+
+src/proto/*_pb2.py
