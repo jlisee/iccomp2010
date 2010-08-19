@@ -1,0 +1,15 @@
+Dependencies
+============
+
+Needed packages
+---------------
+ * python-serial (serial libary for talking to the NXT over bluetooth)
+ * python-protobuf (serialization lib for handling vision messages)
+
+Install command
+---------------
+sudo apt-get install python-protobuf python-serial
+
+Generating the Protocol Buffer Files
+====================================
+Run the "genproto.sh" script from the root directory
