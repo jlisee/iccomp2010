@@ -28,6 +28,9 @@ class FieldUpdateConsumer(threading.Thread):
         # Infinite size FIFO queue (insertion never blocks)
         self._queue = Queue.Queue(maxsize = 0)
 
+        # Start thread
+        threading.Thread.start(self)
+
     def running(self):
         running = None
         self._lock.acquire()
@@ -77,6 +80,62 @@ class DebugConsumer(FieldUpdateConsumer):
     def process_frame(self, frame):
         print messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
 
+class BluetoothConsumer(FieldUpdateConsumer):
+    def start(self, devfile):
+        self.port = self._open_port(devfile)
+        threading.Thread.start(self)
+
+    def process_frame(self, frame):
+        field_info = messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
+        field_info.send_data(self.port)
+
+    def _open_port(devfile):
+        port = serial.Serial()
+        port.setPort(devfile)
+        port.setBaudrate(9600)
+        port.setStopbits(1)
+        port.setByteSize(8)
+        port.setTimeout(500)
+        port.setParity('N')
+        port.open()
+        return port
+
+class ConsumerPool(object):
+    """
+    Manages all our consumer threads which push data to serial port or screen
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._consumers = []
+
+    def add_consumer(self, consumer):
+        self._lock.acquire()
+        self._consumers.append(consumer)
+        self._lock.release()
+
+    def remove_consumer(self, consumer):
+        self._lock.acquire()
+        self._consumers.remove(consumer)
+        self._lock.release()
+
+    def stop_all(self):
+        self._lock.acquire()
+        for consumer in self._consumers:
+            consumer.set_running(False)
+        self._lock.release()
+
+    def join_all(self):
+        self._lock.acquire()
+        for consumer in self._consumers:
+            consumer.join()
+        self._lock.release()
+
+    def put(self, frame):
+        self._lock.acquire()
+        for consumer in self._consumers:
+            consumer.put(frame)
+        self._lock.release()
+    
 # TODO: bluetooth consumer
 
 # TODO: some kind of system which spawns those consumers as they appear
@@ -103,18 +162,29 @@ def main(argv=None):
                       type="int", help="port number to run on")
     (options, args) = parser.parse_args()
     
-    # Go for mreq
+    # Open up the UDP multicast
     sock = open_mcast_socket(options.host, options.port)
 
+    # Consumer pool
+    pool = ConsumerPool()
+    
+    # Create the debug consumer
+    debug = DebugConsumer()
+    debug.start()
+    pool.add_consumer(debug)
+
     wrapper_packet = ssl_wrapper.SSL_WrapperPacket()
-    while 1:
-        data, sender = sock.recvfrom(1500)
+    try:
+        while 1:
+            data, sender = sock.recvfrom(1500)
 
-        wrapper_packet.ParseFromString(data)
-        frame = wrapper_packet.detection
-        field_info = messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
-        print sender, ':', repr(field_info)
-
+            wrapper_packet.ParseFromString(data)
+            frame = wrapper_packet.detection
+            pool.put(frame)
+            
+    except KeyboardInterrupt:
+        pool.stop_all()
+        pool.join_all()
 
 if __name__ == "__main__":
     sys.exit(main())
