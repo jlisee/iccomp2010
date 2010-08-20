@@ -167,9 +167,8 @@ class BluetoothDevWatcher(pyinotify.ProcessEvent):
         self._testmode = testmode
 
     def process_IN_CREATE(self, event):
-        print "Created",event.path,event.name,'pre:',self._prefix
-        if str(event.name).startswith(self._prefix):
-            full_path = os.path.join(event.path, event.name)
+        full_path = os.path.join(event.path, event.name)
+        if full_path.startswith(self._prefix):
             print "Connecting to:",full_path
             
             # Create and store the consumer for future shutdown
@@ -209,11 +208,16 @@ def main(argv=None):
 
     # Parse arguments
     parser = optparse.OptionParser()
-    parser.set_defaults(host="224.5.23.2", port= 10002)
+    parser.set_defaults(host="224.5.23.2", port= 10002, testmode=False,
+                        devprefix='/dev/rfcomm')
     parser.add_option("-H", "--host", dest="hostname",
                       type="string", help="specify UDP multicast ip address")
     parser.add_option("-p", "--port", dest="portnum",
                       type="int", help="port number to run on")
+    parser.add_option("-t", "--test", dest="testmode", action="store_true",
+                       help="Enables writing to normal file")
+    parser.add_option("-d","--devprefix", dest="devprefix", type="string",
+                      help="The prefix for the files that are watched")
     (options, args) = parser.parse_args()
     
     # Open up the UDP multicast
@@ -230,10 +234,11 @@ def main(argv=None):
     mask = pyinotify.EventsCodes.IN_DELETE | pyinotify.EventsCodes.IN_CREATE
     wm = pyinotify.WatchManager()
 
-    blueWatcher = BluetoothDevWatcher('bob', pool, testmode = True)
+    blueWatcher = BluetoothDevWatcher(options.devprefix, pool,
+                                      testmode = options.testmode)
     notifier = pyinotify.ThreadedNotifier(wm, blueWatcher)
-
-    wdd = wm.add_watch('/tmp/blue', mask, rec=False)
+    watchdir, fileprefix = os.path.split(options.devprefix)
+    wdd = wm.add_watch(watchdir, mask, rec=False)
 
     # Start the theads!!
     notifier.start()
