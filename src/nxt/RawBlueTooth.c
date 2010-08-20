@@ -1,10 +1,12 @@
+/**** emacs: -*- mode: c++; c-basic-offset: 2; indent-tabs-mode: nil -*- ****/
 
 /*****************************************************************************/
 /*                                T Y P E S                                  */
 /*****************************************************************************/
 
 static const int MAX_ROBOTS = 10;
-static const int MAX_BALLS = 256;
+static const int MAX_BALLS = 60;
+static const float ANGLE_SCALE = 0.012368475;
 
 /*****************************************************************************/
 /*                                T Y P E S                                  */
@@ -25,14 +27,14 @@ typedef struct
 
 typedef struct
 {
-  // TODO: send both robot poses?
   ubyte numRobots;
   ubyte numBalls;
 } PosInfoHeader;
 
-typedef ubyte ReadBytesBuffer[256];
+typedef ubyte ReadBytesBuffer[64];
 typedef RobotInfo RobotInfoList[MAX_ROBOTS];
 typedef Vector2D BallPositionList[MAX_BALLS];
+
 
 /*****************************************************************************/
 /*                              G L O B A L S                                */
@@ -44,8 +46,12 @@ ReadBytesBuffer g_btReadBuffer;
 /** Header for the robot and ball counts */
 PosInfoHeader g_posInfoHeader;
 
+/** The position headering and ID of all known robots */
+RobotInfoList g_allRobotInfo;
+
 /** All current balls on the field (g_posInfoHeader has total count) */
 BallPositionList g_allBallPositions;
+
 
 /*****************************************************************************/
 /*                                 M A T H                                   */
@@ -149,33 +155,63 @@ void COMsync()
   // When both bytes are 255 we are synced
 }
 
-void COMParseFloat(ubyte data, float& num)
+void COMparseFloat(ubyte data, float& num)
 {
-
+  num = ((float)data) * 0.5;
 }
-
-void COMParseVector2D(Vector2D& vec)
-{
-  // Read in two bytes
-  // Convert to floats
-}
-
-void COMReadRobotInfo(Vector
 
 void COMreadHeader(PosInfoHeader& header, int justSynced)
 {
   // If not justSynced read in the two sync bytes
+  if (!justSynced)
+      BTreadBytes(g_btReadBuffer, 2);
 
-  // Read in first pos
+  // Now read in the two header bytes
+  BTreadBytes(g_btReadBuffer, 2);
 
-  // Read in second pos
+  header.numRobots = g_btReadBuffer[0];
+  if (header.numRobots > MAX_ROBOTS)
+    header.numRobots = MAX_ROBOTS;
+      
+  header.numBalls = g_btReadBuffer[1];
+  if (header.numBalls < MAX_BALLS)
+    header.numBalls = MAX_BALLS;
+}
 
-  // Read in num balls
+void COMreadRoboInfo(int numBalls, RobotInfoList& robotList)
+{
+  for (int i = 0; i < numBalls; ++i)
+  {
+    // Read in five bytes
+    BTreadBytes(g_btReadBuffer, 5);
+
+    // Pull out the id
+    robotList[i].id = g_btReadBuffer[0];
+
+    // Now parse out the heading
+    float angle = ((float)value) * ANGLE_SCALE;
+    if (sign)
+      robotList[i].heading = -angle;
+    else
+      robotList[i].heading = angle;
+    
+    // Do position (remember float conversion)
+    COMparseFloat(g_btReadBuffer[3], robotList[i].pos.x);
+    COMparseFloat(g_btReadBuffer[4], robotList[i].pos.y);
+  }
 }
 
 void COMreadBalls(int numBalls, BallPositionList& ballList)
 {
-  // Reads in all the balls (3 byte packets each)
+  for (int i = 0; i < numBalls; ++i)
+  {
+    // Read in two bytes
+    BTreadBytes(g_btReadBuffer, 2);
+    
+    // Convert to floats
+    COMparseFloat(g_btReadBuffer[0], ballList[i].x);
+    COMparseFloat(g_btReadBuffer[1], ballList[i].y);
+  }
 }
 
 // TODO:
@@ -186,6 +222,9 @@ void COMreadBalls(int numBalls, BallPositionList& ballList)
 
 void COMupdate()
 {
+  COMreadHeader(g_posInfoHeader, 1); // force sync currently
+  COMreadRoboInfo(g_posInfoHeader.numRobots, g_allRobotInfo);
+  COMreadBalls(g_posInfoHeader.numBalls, g_allBallPositions);
 }
 
 void COMstart()
