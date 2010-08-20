@@ -3,6 +3,12 @@
 import struct
 import unittest
 import math
+import StringIO
+
+# Project Imports
+import proto.messages_robocup_ssl_detection_pb2 as ssl_detection
+import proto.messages_robocup_ssl_wrapper_pb2 as ssl_wrapper
+
 
 __doc__ = """
 This module defines the basic data structures that are sent over the wire. 
@@ -13,6 +19,10 @@ which the bluetooth device can read.
 # TODO: deal with signed heading floats!!!
 
 # Free helper functions
+
+#-----------------------------------------------------------------------------#
+#                       H E L P E R   F U N C T I O N S                       #
+#-----------------------------------------------------------------------------#
 
 def compress_float(num):
     """
@@ -83,9 +93,16 @@ def unpack_angle(data, unpack_offset = 0):
 
     return angle
 
-# Classes
+
+#-----------------------------------------------------------------------------#
+#                                C L A S S E S                                #
+#-----------------------------------------------------------------------------#
 
 class Vector2D(object):
+    """
+    Simple X,Y position
+    """
+    
     PACKED_SIZE = 2
 
     def __init__(self,x,y):
@@ -125,8 +142,20 @@ class Vector2D(object):
             return result
         return not result
 
+# TODO: FINISH ME
+class Ball(object):
+    """
+    Represents ball position and size over the wire
+    """
+    PACKED_SIZE = Vector2D.PACKED_SIZE + 1
+    
+
 class RobotInfo(object):
-    PACKED_SIZE = 2 + Vector2D.PACKED_SIZE
+    """
+    Describes the id, position, heading of a robot on the field
+    """
+    
+    PACKED_SIZE = 1 + 2 + Vector2D.PACKED_SIZE
 
     def __init__(self, ID, heading, pos):
         self.id = ID
@@ -141,14 +170,16 @@ class RobotInfo(object):
         return id_data + angle_data + pos_data
 
     @staticmethod
-    def unpack(data):
+    def unpack(data, unpack_offset = 0):
         """Returns and object build from the packed data"""
-        raw_data = struct.unpack('B',data[:1])
+        raw_data = struct.unpack_from('B',data, offset = unpack_offset)
 
         robotInfo = RobotInfo(0,0,0)
         robotInfo.id = uncompress_int(raw_data[0])
-        robotInfo.heading = unpack_angle(data, unpack_offset = 1)
-        robotInfo.pos = Vector2D.unpack(data, unpack_offset = 3)
+        robotInfo.heading = unpack_angle(data,
+                                         unpack_offset = unpack_offset + 1)
+        robotInfo.pos = Vector2D.unpack(data,
+                                        unpack_offset = unpack_offset + 3)
 
         return robotInfo
 
@@ -172,6 +203,12 @@ class RobotInfo(object):
         return not result
 
 class Header(object):
+    """
+    Includes the number of following RobotInfo and Vector2D ball positions
+    """
+
+    PACKED_SIZE = 2
+    
     def __init__(self, num_robots, num_balls):
         self.num_robots = num_robots
         self.num_balls = num_balls
@@ -183,8 +220,9 @@ class Header(object):
         return data
     
     @staticmethod
-    def unpack(data):
-        raw_robot_num, raw_ball_num = struct.unpack('BB',data)
+    def unpack(data, unpack_offset = 0):
+        raw_robot_num, raw_ball_num = struct.unpack_from('BB', data,
+                                                         unpack_offset)
 
         header = Header(0,0)
         header.num_robots = uncompress_int(raw_robot_num)
@@ -192,7 +230,76 @@ class Header(object):
         return header
 
 
-# Tests
+class FieldInfo(object):
+    """
+    Contains all the info about the robots and balls on the field
+    """
+    
+    def __init__(self, detection_packet = None):
+        self.robots = []
+        self.balls = []
+        self.header = None
+        
+        if detection_packet is not None:
+            # Build up robots 
+            for robot in detection_packet.robots_yellow:
+                self.robots.append(RobotInfo(robot.robot_id, robot.orientation,
+                                             Vector2D(robot.x, robot.y)))
+
+            for robot in detection_packet.robots_blue:
+                self.robots.append(RobotInfo(robot.robot_id, robot.orientation,
+                                             Vector2D(robot.x, robot.y)))
+
+            # Build up balls
+            for ball in detection_packet.balls:
+                # TODO: update me to include a ball object
+                self.balls.append(Vector2D(ball.x, ball.y))
+
+            # Header
+            self.header = Header(len(self.robots), len(self.balls))
+
+    def send_data(self, fileobj):
+        """
+        Serializes and writes all the data to the given file descriptor
+        """
+
+        # Put everything in a big list, because the have the same interface,
+        # and send into the file obj
+
+        to_send = [self.header]
+        to_send.extend(self.robots)
+        to_send.extend(self.balls)
+        
+        # Send robots
+        for item in to_send:
+            data = item.pack()
+            fileobj.write(data)
+
+    @staticmethod
+    def unpack(data):
+        offset = 0
+        field_info = FieldInfo()
+        
+        # Header
+        field_info.header = Header.unpack(data)
+        offset += Header.PACKED_SIZE
+        
+        # Robots
+        for i in xrange(0, field_info.header.num_robots):
+            field_info.robots.append(RobotInfo.unpack(data, offset))
+            offset += RobotInfo.PACKED_SIZE
+
+        # Balls
+        for i in xrange(0, field_info.header.num_balls):
+            field_info.balls.append(Vector2D.unpack(data, offset))
+            offset += Vector2D.PACKED_SIZE
+
+        return field_info
+        
+
+#-----------------------------------------------------------------------------#
+#                                T E S T S                                    #
+#-----------------------------------------------------------------------------#
 
 class TestFunctions(unittest.TestCase):
     def test_compress_float(self):
@@ -258,7 +365,6 @@ class TestRobotPosInfo(unittest.TestCase):
         robotInfo = RobotInfo(ID, heading, pos)
         data = robotInfo.pack()
 
-        print 'L',len(data[:1])
         robotInfo2 = RobotInfo.unpack(data)
         self.assertEquals(ID, robotInfo2.id)
         self.assertAlmostEquals(heading, robotInfo2.heading, 2)
@@ -287,6 +393,87 @@ class TestHeader(unittest.TestCase):
         header2 = Header.unpack(data)
         self.assertEquals(num_robots, header2.num_robots)
         self.assertEquals(num_balls, header2.num_balls)
+
+class TestFieldInfo(unittest.TestCase):
+    def setUp(self):
+        self.frame = ssl_detection.SSL_DetectionFrame()
+
+        # Add some balls
+        ball1 = self.frame.balls.add()
+        ball1.x = 20.5
+        ball1.y = 50
+        ball1.area = 200
+
+        ball2 = self.frame.balls.add()
+        ball2.x = 3.5
+        ball2.y = 4.5
+        ball2.area = 100
+
+        # Add some robots
+        robot1 = self.frame.robots_yellow.add()
+        robot1.x = 57
+        robot1.y = 23
+        robot1.robot_id = 5
+        robot1.orientation = math.pi * 0.4
+
+        robot2 = self.frame.robots_blue.add()
+        robot2.x = 57
+        robot2.y = 23
+        robot2.robot_id = 8
+        robot2.orientation = math.pi * 0.3
+
+    
+    def check_field_info(self, field_info):
+        # Check the object counts
+        self.assertEquals(2, len(field_info.balls))
+        self.assertEquals(2, len(field_info.robots))
+
+        # Check the objects
+        for i in xrange(0,len(self.frame.balls)):
+            ball1 = field_info.balls[i]
+            frame_ball1 = self.frame.balls[i]
+            self.assertEqual(frame_ball1.x, ball1.x)
+            self.assertEqual(frame_ball1.y, ball1.y)
+
+        frame_robots = []
+        frame_robots.extend(self.frame.robots_yellow)
+        frame_robots.extend(self.frame.robots_blue)
+
+        for i in xrange(0,len(frame_robots)):
+            robot1 = field_info.robots[i]
+            frame_robot1 = frame_robots[i]
+            self.assertEqual(frame_robot1.x, robot1.pos.x)
+            self.assertEqual(frame_robot1.y, robot1.pos.y)
+            self.assertEqual(frame_robot1.robot_id, robot1.id)
+            self.assertAlmostEqual(frame_robot1.orientation, robot1.heading,2)
+
+    def test_construct(self):
+        field_info = FieldInfo(self.frame)
+        self.check_field_info(field_info)
+
+
+    def test_send_data(self):
+        fileobj = StringIO.StringIO()
+
+        field_info = FieldInfo(self.frame)
+        field_info.send_data(fileobj)
+
+        expected_size = Header.PACKED_SIZE + \
+                        Vector2D.PACKED_SIZE * len(self.frame.balls) + \
+                        RobotInfo.PACKED_SIZE * len(self.frame.robots_yellow)+\
+                        RobotInfo.PACKED_SIZE * len(self.frame.robots_blue)
+        
+        self.assertEquals(expected_size, len(fileobj.getvalue()))
+
+    def test_pack_unpack(self):
+        fileobj = StringIO.StringIO()
+                
+        field_info = FieldInfo(self.frame)
+        field_info.send_data(fileobj)
+
+        field_info2 = FieldInfo.unpack(fileobj.getvalue())
+        self.check_field_info(field_info2)
+
 
 
 if __name__ == '__main__':
