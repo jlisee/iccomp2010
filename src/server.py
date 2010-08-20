@@ -6,11 +6,14 @@ import sys
 import optparse
 import struct
 import socket
+import os
 
-# Project imports
+# Project Imports
 import messages
-
 import proto.messages_robocup_ssl_wrapper_pb2 as ssl_wrapper
+
+# Library Imports
+import pyinotify
 
 X_SHIFT = 121.92;
 Y_SHIFT = 121.92/2.0;
@@ -78,16 +81,26 @@ class DebugConsumer(FieldUpdateConsumer):
     """
 
     def process_frame(self, frame):
-        print messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
+        #print messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
+        pass
 
 class BluetoothConsumer(FieldUpdateConsumer):
-    def start(self, devfile):
-        self.port = self._open_port(devfile)
-        threading.Thread.start(self)
+    """
+    Consumes frames and writes out on the given port
+    """
+    
+    def start(self, devfile, testmode = False):
+        if not testmode:
+            self.port = self._open_port(devfile)
+        else:
+            self.port = open(devfile,'w')
+        FieldUpdateConsumer.start(self)
 
     def process_frame(self, frame):
-        field_info = messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
-        field_info.send_data(self.port)
+        if self.port is not None:
+            field_info = messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
+            field_info.send_data(self.port)
+            self.port.flush()
 
     def _open_port(devfile):
         port = serial.Serial()
@@ -98,7 +111,7 @@ class BluetoothConsumer(FieldUpdateConsumer):
         port.setTimeout(500)
         port.setParity('N')
         port.open()
-        return port
+        return port    
 
 class ConsumerPool(object):
     """
@@ -140,6 +153,47 @@ class ConsumerPool(object):
 
 # TODO: some kind of system which spawns those consumers as they appear
 
+class BluetoothDevWatcher(pyinotify.ProcessEvent):
+    """
+    Watches the device directory, and create BluetoothConsumers for new devices
+    """
+    
+    def __init__(self, prefix, pool, testmode = False):
+        pyinotify.ProcessEvent.__init__(self)
+
+        self._pool = pool
+        self._prefix = prefix
+        self._blueConsumers = {}
+        self._testmode = testmode
+
+    def process_IN_CREATE(self, event):
+        print "Created",event.path,event.name,'pre:',self._prefix
+        if str(event.name).startswith(self._prefix):
+            full_path = os.path.join(event.path, event.name)
+            print "Connecting to:",full_path
+            
+            # Create and store the consumer for future shutdown
+            blue_con = BluetoothConsumer()
+            self._blueConsumers[full_path] = blue_con
+
+            # Start up and add to the pool
+            blue_con.start(full_path, self._testmode)
+            self._pool.add_consumer(blue_con)
+
+    def process_IN_DELETE(self, event):
+        """
+        Tries to find the currently created consumer for this device and
+        shut it down if needed
+        """
+        full_path = os.path.join(event.path, event.name)
+        if full_path in self._blueConsumers:
+            print "Removing:",full_path
+            blue_con = self._blueConsumers[full_path]
+            blue_con.set_running(False)
+            self._pool.remove_consumer(blue_con)
+            blue_con.join()
+
+
 def open_mcast_socket(ip_addr_str, port):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -170,8 +224,20 @@ def main(argv=None):
     
     # Create the debug consumer
     debug = DebugConsumer()
-    debug.start()
     pool.add_consumer(debug)
+
+    # Create the watcher
+    mask = pyinotify.EventsCodes.IN_DELETE | pyinotify.EventsCodes.IN_CREATE
+    wm = pyinotify.WatchManager()
+
+    blueWatcher = BluetoothDevWatcher('bob', pool, testmode = True)
+    notifier = pyinotify.ThreadedNotifier(wm, blueWatcher)
+
+    wdd = wm.add_watch('/tmp/blue', mask, rec=False)
+
+    # Start the theads!!
+    notifier.start()
+    debug.start()
 
     wrapper_packet = ssl_wrapper.SSL_WrapperPacket()
     try:

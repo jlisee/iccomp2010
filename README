@@ -5,10 +5,11 @@ Needed packages
 ---------------
  * python-serial (serial libary for talking to the NXT over bluetooth)
  * python-protobuf (serialization lib for handling vision messages)
-
+ * python-pyinotify (watches dev directory for new bluetooth devices)
+ 
 Install command
 ---------------
-sudo apt-get install python-protobuf python-serial
+sudo apt-get install python-protobuf python-serial python-pyinotify
 
 Generating the Protocol Buffer Files
 ====================================
