@@ -98,6 +98,8 @@ class BluetoothConsumer(FieldUpdateConsumer):
 
     def process_frame(self, frame):
         if self.port is not None:
+	    self.port.write(struct.pack('BB',255,255))
+	    self.port.write(data)
             field_info = messages.FieldInfo(frame,X_SHIFT,Y_SHIFT,SCALE)
             field_info.send_data(self.port)
             self.port.flush()
@@ -148,10 +150,6 @@ class ConsumerPool(object):
         for consumer in self._consumers:
             consumer.put(frame)
         self._lock.release()
-    
-# TODO: bluetooth consumer
-
-# TODO: some kind of system which spawns those consumers as they appear
 
 class BluetoothDevWatcher(pyinotify.ProcessEvent):
     """

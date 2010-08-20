@@ -2,6 +2,8 @@
 # Standard Imports
 import sys
 import optparse
+import struct
+import StringIO
 
 # Library import
 import serial
@@ -29,9 +31,19 @@ def basic_test(port):
     print '"%s" sent' % msg
 
 def full_test(port):
-    field_info = messages.make_test_detectionframe()
-    print 'Sending full packet:\n',field_info
-    field_info.send_data(port)
+    packet = messages.make_test_detectionframe()
+    field_info = messages.FieldInfo(packet)
+    
+    stringIO = StringIO.StringIO()
+    field_info.send_data(stringIO)
+    
+    data = stringIO.getvalue()
+    conv_field_info = messages.FieldInfo.unpack(data)
+
+    print 'Sending full packet:\n',conv_field_info
+    port.write(struct.pack('BB',255,255))
+    port.write(data)
+    port.flush()
     print 'sent'
 
 def main(argv=None):
