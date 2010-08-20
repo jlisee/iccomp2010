@@ -2,6 +2,7 @@
 # Standard Imports
 import struct
 import unittest
+import math
 
 __doc__ = """
 This module defines the basic data structures that are sent over the wire. 
@@ -13,26 +14,26 @@ which the bluetooth device can read.
 
 # Free helper functions
 
-def pack_float(num):
+def compress_float(num):
     """
-    Packs floating pointer number to fixed point 0.5 percision value
-    that is capped at 254.
+    Packs a floating point number with a value of 0.0 to 127.0, with a 
+    percision of 0.5 into a single byte (max value 254)
     """
-    rawNum = int(round(num*2.0))
-    if rawNum > 254:
+    raw_num = int(round(num*2.0))
+    if raw_num > 254:
         res = 254
     else:
-        res = rawNum
+        res = raw_num
         
     return res
 
-def unpack_float(packedNum):
+def uncompress_float(packedNum):
     """
     Reverse the effects of packing the float
     """
     return packedNum * 0.5    
 
-def pack_int(num):
+def compress_int(num):
     """
     Packs the value as a norma int limited to a size of 254
     """
@@ -40,8 +41,47 @@ def pack_int(num):
         return 254
     return int(round(num))
 
-def unpack_int(num):
+def uncompress_int(num):
     return num
+
+def pack_angle(angle):
+    """
+    This packs the an angle with ~single degree precision into two bytes
+    """
+    # Remove "excess" angle (ie. extra multiples of 2pi)
+    angle = angle % (2*math.pi)
+
+    # Make the angle between -pi and pi
+    if angle > math.pi:
+        angle -= 2*math.pi
+
+    # Scale the angle down into to down into 254 values
+    scaled_angle = angle * (254/math.pi) / 2.0
+
+    # Determine sign
+    sign = 0
+    if scaled_angle < 0:
+        sign = 1
+
+    return struct.pack('BB', sign, compress_float(math.fabs(scaled_angle)))
+
+def unpack_angle(data, unpack_offset = 0):
+    """
+    This unpacks results from the angle compression
+    """
+    # Unpack and uncompress the data
+    sign, raw_scaled_angle = struct.unpack_from('BB', data, 
+                                                offset = unpack_offset)
+    scaled_angle = uncompress_float(raw_scaled_angle)
+    
+    # Unscale the data from its scaled form
+    angle = scaled_angle * (math.pi/254) * 2.0
+
+    # The sign value designates negative numbers
+    if sign:
+        angle = -angle;
+
+    return angle
 
 # Classes
 
@@ -54,15 +94,17 @@ class Vector2D(object):
 
     def pack(self):
         """Returns the object encoded in a binary string"""
-        return struct.pack('BB', pack_float(self.x),  pack_float(self.y))
+        return struct.pack('BB', 
+                           compress_float(self.x),  
+                           compress_float(self.y))
 
     @staticmethod
     def unpack(data, unpack_offset = 0):
         """Returns and object build from the packed data"""
         vec = Vector2D(0,0)
-        rawX, rawY = struct.unpack_from('BB',data, offset = unpack_offset)
-        vec.x = unpack_float(rawX)
-        vec.y = unpack_float(rawY)
+        raw_X, raw_Y = struct.unpack_from('BB',data, offset = unpack_offset)
+        vec.x = uncompress_float(raw_X)
+        vec.y = uncompress_float(raw_Y)
         return vec
 
     # Boiler plate methods
@@ -93,19 +135,20 @@ class RobotInfo(object):
 
     def pack(self):
         """Returns the object encoded in a binary string"""
-        data = struct.pack('BB', pack_int(self.id), pack_float(self.heading))
-        posData = self.pos.pack()
-        return data + posData
+        id_data = struct.pack('B', compress_int(self.id))
+        angle_data = pack_angle(self.heading)
+        pos_data = self.pos.pack()
+        return id_data + angle_data + pos_data
 
     @staticmethod
     def unpack(data):
         """Returns and object build from the packed data"""
-        rawID, rawHeading = struct.unpack('BB',data[:2])
+        raw_data = struct.unpack('B',data[:1])
 
         robotInfo = RobotInfo(0,0,0)
-        robotInfo.id = unpack_int(rawID)
-        robotInfo.heading = unpack_float(rawHeading)
-        robotInfo.pos = Vector2D.unpack(data, unpack_offset = 2)
+        robotInfo.id = uncompress_int(raw_data[0])
+        robotInfo.heading = unpack_angle(data, unpack_offset = 1)
+        robotInfo.pos = Vector2D.unpack(data, unpack_offset = 3)
 
         return robotInfo
 
@@ -129,40 +172,60 @@ class RobotInfo(object):
         return not result
 
 class Header(object):
-    def __init__(self, numRobots, numBalls):
-        self.numRobots = numRobots
-        self.numBalls = numBalls
+    def __init__(self, num_robots, num_balls):
+        self.num_robots = num_robots
+        self.num_balls = num_balls
 
     def pack(self):
         data = struct.pack('BB',
-                           pack_int(self.numRobots),
-                           pack_int(self.numBalls))
+                           compress_int(self.num_robots),
+                           compress_int(self.num_balls))
         return data
     
     @staticmethod
     def unpack(data):
-        rawRobotNum, rawBallNum = struct.unpack('BB',data)
+        raw_robot_num, raw_ball_num = struct.unpack('BB',data)
 
         header = Header(0,0)
-        header.numRobots = unpack_int(rawRobotNum)
-        header.numBalls = unpack_int(rawBallNum)
+        header.num_robots = uncompress_int(raw_robot_num)
+        header.num_balls = uncompress_int(raw_ball_num)
         return header
 
 
 # Tests
 
 class TestFunctions(unittest.TestCase):
-    def test_pack_float(self):
-        self.assertEquals(10, pack_float(5.0))
-        self.assertEquals(5, pack_float(2.5))
+    def test_compress_float(self):
+        self.assertEquals(10, compress_float(5.0))
+        self.assertEquals(5, compress_float(2.5))
 
-    def test_unpack_float(self):
-        self.assertEquals(7.5, unpack_float(15))
+    def test_uncompress_float(self):
+        self.assertEquals(7.5, uncompress_float(15))
 
-    def test_pack_int(self):
-        self.assertEqual(5, pack_int(5))
-        self.assertEqual(254, pack_int(255))
-        self.assertEqual(254, pack_int(655))
+    def test_float_compression(self):
+        comp_float = compress_float(117.8)
+        self.assertAlmostEqual(118, uncompress_float(comp_float),1)
+        
+    def test_compress_int(self):
+        self.assertEqual(5, compress_int(5))
+        self.assertEqual(254, compress_int(255))
+        self.assertEqual(254, compress_int(655))
+
+    def test_pack_angle(self):
+        # Positive
+        angle = math.pi * 7/10;
+        data = pack_angle(angle)
+        self.assertAlmostEqual(angle, unpack_angle(data), 2)
+
+        # Negative
+        angle = -math.pi * 3/10;
+        data = pack_angle(angle)
+        self.assertAlmostEqual(angle, unpack_angle(data), 2)
+
+        # Wrap around
+        data = pack_angle(math.pi * 1.5)
+        self.assertAlmostEqual(-math.pi * 0.5, unpack_angle(data), 2)
+
 
 class TestVector2D(unittest.TestCase):
 
@@ -189,15 +252,16 @@ class TestVector2D(unittest.TestCase):
 class TestRobotPosInfo(unittest.TestCase):
     def test_pack_unpack(self):
         ID = 3
-        heading = 13.5
+        heading = math.pi * 0.3
         pos = Vector2D(3.5, 6)
 
         robotInfo = RobotInfo(ID, heading, pos)
         data = robotInfo.pack()
 
+        print 'L',len(data[:1])
         robotInfo2 = RobotInfo.unpack(data)
         self.assertEquals(ID, robotInfo2.id)
-        self.assertEquals(heading, robotInfo2.heading)
+        self.assertAlmostEquals(heading, robotInfo2.heading, 2)
         self.assertEqual(pos, robotInfo2.pos)
 
     def test_equals(self):
@@ -214,15 +278,15 @@ class TestRobotPosInfo(unittest.TestCase):
 
 class TestHeader(unittest.TestCase):
     def test_pack_unpack(self):
-        numRobots = 5;
-        numBalls = 3;
+        num_robots = 5;
+        num_balls = 3;
 
-        header = Header(numRobots, numBalls)
+        header = Header(num_robots, num_balls)
         data = header.pack()
 
         header2 = Header.unpack(data)
-        self.assertEquals(numRobots, header2.numRobots)
-        self.assertEquals(numBalls, header2.numBalls)
+        self.assertEquals(num_robots, header2.num_robots)
+        self.assertEquals(num_balls, header2.num_balls)
 
 
 if __name__ == '__main__':
