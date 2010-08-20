@@ -229,6 +229,12 @@ class Header(object):
         header.num_balls = uncompress_int(raw_ball_num)
         return header
 
+    def __str__(self):
+        return self.__repr__()
+
+    def __repr__(self):
+        return "Header(robo#: %d ball# %d)" % (self.num_robots, self.num_balls)
+
 
 class FieldInfo(object):
     """
@@ -295,7 +301,18 @@ class FieldInfo(object):
             offset += Vector2D.PACKED_SIZE
 
         return field_info
+
+    def __str__(self):
+        return self.__repr__()
         
+    def __repr__(self):
+        string_io = StringIO.StringIO()
+        string_io.write("%s\n" % str(self.header))
+        for robot in self.robots:
+            string_io.write("%s\n" % robot)
+        for ball in self.balls:
+            string_io.write("Ball: %s\n" % ball)
+        return string_io.getvalue()
 
 #-----------------------------------------------------------------------------#
 #                                T E S T S                                    #
@@ -394,34 +411,38 @@ class TestHeader(unittest.TestCase):
         self.assertEquals(num_robots, header2.num_robots)
         self.assertEquals(num_balls, header2.num_balls)
 
+def make_test_detectionframe():
+    frame = ssl_detection.SSL_DetectionFrame()
+    
+    # Add some balls
+    ball1 = frame.balls.add()
+    ball1.x = 20.5
+    ball1.y = 50
+    ball1.area = 200
+    
+    ball2 = frame.balls.add()
+    ball2.x = 3.5
+    ball2.y = 4.5
+    ball2.area = 100
+    
+    # Add some robots
+    robot1 = frame.robots_yellow.add()
+    robot1.x = 57
+    robot1.y = 23
+    robot1.robot_id = 5
+    robot1.orientation = math.pi * 0.4
+    
+    robot2 = frame.robots_blue.add()
+    robot2.x = 57
+    robot2.y = 23
+    robot2.robot_id = 8
+    robot2.orientation = math.pi * 0.3
+
+    return frame
+
 class TestFieldInfo(unittest.TestCase):
     def setUp(self):
-        self.frame = ssl_detection.SSL_DetectionFrame()
-
-        # Add some balls
-        ball1 = self.frame.balls.add()
-        ball1.x = 20.5
-        ball1.y = 50
-        ball1.area = 200
-
-        ball2 = self.frame.balls.add()
-        ball2.x = 3.5
-        ball2.y = 4.5
-        ball2.area = 100
-
-        # Add some robots
-        robot1 = self.frame.robots_yellow.add()
-        robot1.x = 57
-        robot1.y = 23
-        robot1.robot_id = 5
-        robot1.orientation = math.pi * 0.4
-
-        robot2 = self.frame.robots_blue.add()
-        robot2.x = 57
-        robot2.y = 23
-        robot2.robot_id = 8
-        robot2.orientation = math.pi * 0.3
-
+        self.frame = make_test_detectionframe()
     
     def check_field_info(self, field_info):
         # Check the object counts
