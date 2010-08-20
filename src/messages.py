@@ -241,28 +241,36 @@ class FieldInfo(object):
     Contains all the info about the robots and balls on the field
     """
     
-    def __init__(self, detection_packet = None):
+    def __init__(self, detection_packet = None,
+                 x_shift = 0, y_shift = 0, scale = 1):
         self.robots = []
         self.balls = []
         self.header = None
+        self._x_shift = x_shift
+        self._y_shift = y_shift
+        self._scale = scale
         
         if detection_packet is not None:
             # Build up robots 
             for robot in detection_packet.robots_yellow:
                 self.robots.append(RobotInfo(robot.robot_id, robot.orientation,
-                                             Vector2D(robot.x, robot.y)))
+                                             self._parse_pos(robot)))
 
             for robot in detection_packet.robots_blue:
                 self.robots.append(RobotInfo(robot.robot_id, robot.orientation,
-                                             Vector2D(robot.x, robot.y)))
+                                             self._parse_pos(robot)))
 
             # Build up balls
             for ball in detection_packet.balls:
                 # TODO: update me to include a ball object
-                self.balls.append(Vector2D(ball.x, ball.y))
+                self.balls.append(self._parse_pos(ball))
 
             # Header
             self.header = Header(len(self.robots), len(self.balls))
+
+    def _parse_pos(self, obj):
+        return Vector2D((obj.x * self._scale) + self._x_shift,
+                        (obj.y * self._scale) + self._y_shift)
 
     def send_data(self, fileobj):
         """
