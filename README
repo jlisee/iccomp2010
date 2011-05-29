@@ -1,5 +1,22 @@
+=================
+IC Comp 2010 Code
+=================
+
+Copyright (c) 2011 Joseph Lisee
+All rights reserved.
+
+
+License information
+=================
+
+The OSI MIT License is used.  Please See the file "LICENSE" for information on
+the history of this software, terms & conditions for usage, and a DISCLAIMER OF
+ALL WARRANTIES.
+
+
 About
 =====
+
 This is an unfinished set of code from the Robotics Institute 2010 immigration 
 course.  It's purpose was to take the positions of balls on a game board and
 broadcast them over bluetooth to a set of NXT bricks allowing players to better
@@ -10,6 +27,7 @@ What it does have is some basic examples of UDP multicast in python and
 producer consumer multithreading to handling sending out data to multiple 
 bluetooth devices.
 
+
 Dependencies
 ============
 
@@ -18,11 +36,18 @@ Needed packages
  * python-serial (serial libary for talking to the NXT over bluetooth)
  * python-protobuf (serialization lib for handling vision messages)
  * python-pyinotify (watches dev directory for new bluetooth devices)
+ * ssl-vision (needed to see target balls in arena)
  
-Install command
----------------
-sudo apt-get install python-protobuf python-serial python-pyinotify
+Install commands
+----------------
+For the python packages::
+
+  sudo apt-get install python-protobuf python-serial python-pyinotify
+
+For ssl-vision follow the instruction in the deps/ssl-vision directory.
+
 
 Generating the Protocol Buffer Files
 ====================================
-Run the "genproto.sh" script from the root directory
+Run the "genproto.sh" script from the root directory.  These are used to 
+communicate with ssl-vision and receive ball positions.
