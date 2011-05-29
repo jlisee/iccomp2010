@@ -1,3 +1,15 @@
+About
+=====
+This is an unfinished set of code from the Robotics Institute 2010 immigration 
+course.  It's purpose was to take the positions of balls on a game board and
+broadcast them over bluetooth to a set of NXT bricks allowing players to better
+reason about the competition environment.  Development was halted when the NXT
+bluetooth proved to flaky for the task.
+
+What it does have is some basic examples of UDP multicast in python and
+producer consumer multithreading to handling sending out data to multiple 
+bluetooth devices.
+
 Dependencies
 ============
 
